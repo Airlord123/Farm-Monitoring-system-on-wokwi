@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "author": "Farm Sensor Monitor",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "wokwi-esp32-devkit-v1",
+      "id": "esp",
+      "top": 0,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-dht22",
+      "id": "dht1",
+      "top": -67.6,
+      "left": 105.6,
+      "attrs": { "temperature": "24", "humidity": "65" }
+    },
+    {
+      "type": "wokwi-potentiometer",
+      "id": "pot1",
+      "top": 79.35,
+      "left": -172.8,
+      "attrs": { "label": "Soil Moisture" }
+    },
+    {
+      "type": "wokwi-photoresistor-sensor",
+      "id": "ldr1",
+      "top": -105.6,
+      "left": -86.4,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-potentiometer",
+      "id": "pot2",
+      "top": 169.55,
+      "left": -172.8,
+      "attrs": { "label": "pH Sensor" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led1",
+      "top": -124.8,
+      "left": 230.6,
+      "attrs": { "color": "green" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r1",
+      "top": -45.6,
+      "left": 230.4,
+      "rotate": 90,
+      "attrs": { "value": "220" }
+    }
+  ],
+  "connections": [
+    [ "esp:TX0", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX0", "$serialMonitor:TX", "", [] ],
+    [ "dht1:VCC", "esp:3V3", "red", [ "v0" ] ],
+    [ "dht1:GND", "esp:GND.1", "black", [ "v0" ] ],
+    [ "dht1:SDA", "esp:D15", "green", [ "v0" ] ],
+    [ "pot1:GND", "esp:GND.1", "black", [ "h0" ] ],
+    [ "pot1:VCC", "esp:3V3", "red", [ "h0" ] ],
+    [ "pot1:SIG", "esp:D34", "blue", [ "h0" ] ],
+    [ "ldr1:VCC", "esp:3V3", "red", [ "h0" ] ],
+    [ "ldr1:GND", "esp:GND.1", "black", [ "h0" ] ],
+    [ "ldr1:AO", "esp:D35", "yellow", [ "h0" ] ],
+    [ "pot2:GND", "esp:GND.2", "black", [ "h0" ] ],
+    [ "pot2:VCC", "esp:3V3", "red", [ "h0" ] ],
+    [ "pot2:SIG", "esp:D32", "purple", [ "h0" ] ],
+    [ "led1:A", "esp:D2", "green", [ "v0" ] ],
+    [ "led1:C", "r1:1", "green", [ "v0" ] ],
+    [ "r1:2", "esp:GND.1", "black", [ "h0" ] ]
+  ],
+  "dependencies": {}
+}
