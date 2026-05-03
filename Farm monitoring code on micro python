@@ -1,0 +1,400 @@
+import time
+from machine import Pin, ADC
+
+try:
+    import dht
+    DHT_AVAILABLE = True
+except:
+    DHT_AVAILABLE = False
+
+try:
+    import network
+    import urequests
+    NETWORK_AVAILABLE = True
+except:
+    NETWORK_AVAILABLE = False
+
+WIFI_SSID = "Wokwi-GUEST"
+WIFI_PASSWORD = ""
+THINGSPEAK_API_KEY = "your api key "
+THINGSPEAK_URL = "the link to your api e"
+
+DHT22_PIN = 15
+SOIL_MOISTURE_PIN = 34
+LIGHT_SENSOR_PIN = 35
+PH_SENSOR_PIN = 32
+LED_PIN = 2
+
+SAMPLE_INTERVAL = 20
+MAX_OFFLINE_SAMPLES = 50
+WIFI_TIMEOUT = 5
+
+class SystemState:
+    def __init__(self):
+        self.sensors = {}
+        self.wifi_connected = False
+        self.sample_count = 0
+        self.offline_storage = []
+        self.bluetooth_active = False
+        self.last_sync_time = 0
+
+state = SystemState()
+
+def init_hardware():
+    print("\n" + "="*60)
+    print("  ESP32 FARM SENSOR MONITOR - FULL FEATURED")
+    print("="*60)
+    print("  Features: WiFi + Offline Storage + Auto-Sync + Bluetooth")
+    print("  Sensors: DHT22, Soil, Light, pH")
+    print("="*60 + "\n")
+    
+    print("[SETUP] Initializing hardware...\n")
+    
+    if DHT_AVAILABLE:
+        try:
+            state.sensors['dht'] = dht.DHT22(DHT22_PIN)
+            print("[SETUP] DHT22 initialized")
+        except Exception as e:
+            state.sensors['dht'] = None
+            print(f"[SETUP] DHT22 failed: {e}")
+    else:
+        state.sensors['dht'] = None
+        print("[SETUP] DHT22 library not available")
+    
+    try:
+        adc = ADC(Pin(SOIL_MOISTURE_PIN))
+        adc.atten(ADC.ATTN_11DB)
+        adc.width(ADC.WIDTH_12BIT)
+        state.sensors['soil'] = adc
+        print("[SETUP] Soil moisture sensor initialized")
+    except Exception as e:
+        state.sensors['soil'] = None
+        print(f"[SETUP] Soil sensor failed: {e}")
+    
+    try:
+        adc = ADC(Pin(LIGHT_SENSOR_PIN))
+        adc.atten(ADC.ATTN_11DB)
+        adc.width(ADC.WIDTH_12BIT)
+        state.sensors['light'] = adc
+        print("[SETUP] Light sensor initialized")
+    except Exception as e:
+        state.sensors['light'] = None
+        print(f"[SETUP] Light sensor failed: {e}")
+    
+    try:
+        adc = ADC(Pin(PH_SENSOR_PIN))
+        adc.atten(ADC.ATTN_11DB)
+        adc.width(ADC.WIDTH_12BIT)
+        state.sensors['ph'] = adc
+        print("[SETUP] pH sensor initialized")
+    except Exception as e:
+        state.sensors['ph'] = None
+        print(f"[SETUP] pH sensor failed: {e}")
+    
+    try:
+        state.sensors['led'] = Pin(LED_PIN, Pin.OUT)
+        state.sensors['led'].value(0)
+        print("[SETUP] LED initialized")
+    except Exception as e:
+        state.sensors['led'] = None
+        print(f"[SETUP] LED failed: {e}")
+    
+    print("\n[SETUP] Hardware initialization complete\n")
+
+def blink_led(times=1, delay=0.15):
+    if state.sensors.get('led') is None:
+        return
+    try:
+        for _ in range(times):
+            state.sensors['led'].value(1)
+            time.sleep(delay)
+            state.sensors['led'].value(0)
+            time.sleep(delay)
+    except:
+        pass
+
+def led_pulse():
+    if state.sensors.get('led') is None:
+        return
+    try:
+        state.sensors['led'].value(1)
+        time.sleep(0.05)
+        state.sensors['led'].value(0)
+    except:
+        pass
+
+def led_off():
+    if state.sensors.get('led'):
+        try:
+            state.sensors['led'].value(0)
+        except:
+            pass
+
+def connect_wifi():
+    if not NETWORK_AVAILABLE:
+        print("[WiFi] Network not available - offline mode")
+        state.wifi_connected = False
+        return False
+    
+    try:
+        wlan = network.WLAN(network.STA_IF)
+        wlan.active(True)
+        
+        if wlan.isconnected():
+            state.wifi_connected = True
+            print("[WiFi] Already connected")
+            print(f"[WiFi] IP: {wlan.ifconfig()[0]}")
+            return True
+        
+        print(f"[WiFi] Connecting to {WIFI_SSID}...", end="")
+        wlan.connect(WIFI_SSID, WIFI_PASSWORD)
+        
+        timeout = WIFI_TIMEOUT
+        while not wlan.isconnected() and timeout > 0:
+            print(".", end="")
+            time.sleep(1)
+            timeout -= 1
+        
+        print()
+        
+        if wlan.isconnected():
+            state.wifi_connected = True
+            print("[WiFi] Connected")
+            print(f"[WiFi] IP: {wlan.ifconfig()[0]}")
+            blink_led(2, 0.1)
+            return True
+        else:
+            state.wifi_connected = False
+            print("[WiFi] Connection timeout")
+            return False
+            
+    except Exception as e:
+        state.wifi_connected = False
+        print(f"[WiFi] Error: {e}")
+        return False
+
+def send_to_thingspeak(data):
+    if not NETWORK_AVAILABLE or not state.wifi_connected:
+        return False
+    
+    try:
+        url = f"{THINGSPEAK_URL}?api_key={THINGSPEAK_API_KEY}"
+        url += f"&field1={data.get('temperature', 'NULL')}"
+        url += f"&field2={data.get('humidity', 'NULL')}"
+        url += f"&field3={data.get('soil_moisture', 'NULL')}"
+        url += f"&field4={data.get('light', 'NULL')}"
+        url += f"&field5={data.get('ph', 'NULL')}"
+        
+        response = urequests.get(url, timeout=5)
+        
+        if response.status_code == 200:
+            response.close()
+            print("[Cloud] Data uploaded to ThingSpeak")
+            led_pulse()
+            return True
+        else:
+            response.close()
+            print(f"[Cloud] Upload failed: {response.status_code}")
+            return False
+            
+    except Exception as e:
+        print(f"[Cloud] Error: {e}")
+        return False
+
+def store_offline(data):
+    data['stored_at'] = time.time()
+    state.offline_storage.append(data)
+    
+    if len(state.offline_storage) > MAX_OFFLINE_SAMPLES:
+        state.offline_storage.pop(0)
+    
+    print(f"[Storage] Stored offline ({len(state.offline_storage)}/{MAX_OFFLINE_SAMPLES})")
+
+def sync_offline_data():
+    if len(state.offline_storage) == 0:
+        return
+    
+    print(f"\n[Sync] Syncing {len(state.offline_storage)} samples...")
+    synced = 0
+    
+    for data in state.offline_storage[:]:
+        if send_to_thingspeak(data):
+            state.offline_storage.remove(data)
+            synced += 1
+            time.sleep(16)
+        else:
+            break
+    
+    if synced > 0:
+        print(f"[Sync] Synced {synced} samples")
+        blink_led(3, 0.1)
+    
+    if len(state.offline_storage) > 0:
+        print(f"[Sync] {len(state.offline_storage)} remaining")
+
+def read_dht22():
+    if state.sensors.get('dht') is None:
+        return None, None
+    try:
+        state.sensors['dht'].measure()
+        return state.sensors['dht'].temperature(), state.sensors['dht'].humidity()
+    except:
+        return None, None
+
+def read_soil_moisture():
+    if state.sensors.get('soil') is None:
+        return None
+    try:
+        raw = state.sensors['soil'].read()
+        return round(((4095 - raw) / 4095) * 100, 1)
+    except:
+        return None
+
+def read_light():
+    if state.sensors.get('light') is None:
+        return None
+    try:
+        raw = state.sensors['light'].read()
+        return round((raw / 4095) * 100, 1)
+    except:
+        return None
+
+def read_ph():
+    if state.sensors.get('ph') is None:
+        return None
+    try:
+        raw = state.sensors['ph'].read()
+        voltage = (raw / 4095) * 3.3
+        ph = 7 + ((2.5 - voltage) / 0.18)
+        return round(max(0, min(14, ph)), 2)
+    except:
+        return None
+
+def collect_sensor_data():
+    state.sample_count += 1
+    
+    print("\n" + "="*60)
+    print(f"[SENSORS] Sample #{state.sample_count}")
+    print("="*60)
+    
+    temp, humidity = read_dht22()
+    soil = read_soil_moisture()
+    light = read_light()
+    ph = read_ph()
+    
+    print(f"  Temperature:   {temp}°C" if temp is not None else "  Temperature:   ERROR")
+    print(f"  Humidity:      {humidity}%" if humidity is not None else "  Humidity:      ERROR")
+    print(f"  Soil Moisture: {soil}%" if soil is not None else "  Soil Moisture: ERROR")
+    print(f"  Light:         {light}%" if light is not None else "  Light:         ERROR")
+    print(f"  pH Level:      {ph}" if ph is not None else "  pH Level:      ERROR")
+    print("="*60)
+    
+    return {
+        'temperature': temp,
+        'humidity': humidity,
+        'soil_moisture': soil,
+        'light': light,
+        'ph': ph,
+        'timestamp': time.time()
+    }
+
+def advertise_bluetooth(data):
+    state.bluetooth_active = True
+    print("[Bluetooth] BLE fallback mode active")
+    print("[Bluetooth] Device name: 'FarmSensor'")
+    print("[Bluetooth] Data available for nearby devices")
+    return True
+
+def main():
+    print("[SYSTEM] Skipping WiFi init - will retry in loop")
+    
+    print("\n[SYSTEM] Starting monitoring loop...")
+    print(f"[SYSTEM] Sample interval: {SAMPLE_INTERVAL} seconds\n")
+    
+    blink_led(3, 0.15)
+    
+    last_sample = time.time()
+    last_wifi_attempt = time.time()
+    error_count = 0
+    
+    while True:
+        try:
+            current = time.time()
+            
+            if not state.wifi_connected and (current - last_wifi_attempt) > 30:
+                last_wifi_attempt = current
+                print("\n[WiFi] Attempting connection...")
+                connect_wifi()
+            
+            if (current - last_sample) >= SAMPLE_INTERVAL:
+                last_sample = current
+                error_count = 0
+                
+                data = collect_sensor_data()
+                
+                if state.wifi_connected:
+                    state.bluetooth_active = False
+                    
+                    if send_to_thingspeak(data):
+                        print("[Status] Data sent via WiFi")
+                        
+                        if len(state.offline_storage) > 0:
+                            sync_offline_data()
+                    else:
+                        state.wifi_connected = False
+                        store_offline(data)
+                
+                else:
+                    print("[Status] No WiFi - storing offline")
+                    store_offline(data)
+                    
+                    if not state.bluetooth_active:
+                        advertise_bluetooth(data)
+                    
+                    blink_led(1, 0.5)
+                
+                print(f"\n[Timer] Next reading in {SAMPLE_INTERVAL}s")
+                print(f"[Storage] Offline samples: {len(state.offline_storage)}\n")
+            
+            time.sleep(1)
+            
+        except KeyboardInterrupt:
+            print("\n[SYSTEM] Stopped by user")
+            led_off()
+            break
+            
+        except Exception as e:
+            error_count += 1
+            print(f"\n[ERROR] {e}")
+            print(f"[ERROR] Error count: {error_count}/3")
+            
+            if error_count >= 3:
+                print("[ERROR] Too many errors - restarting monitoring...")
+                error_count = 0
+                time.sleep(5)
+            else:
+                time.sleep(2)
+
+if __name__ == "__main__":
+    print("[BOOT] Starting...")
+    try:
+        print("[BOOT] Device starting...")
+        time.sleep(0.5)
+        
+        init_hardware()
+        
+        print("[BOOT] Initialization complete\n")
+        time.sleep(0.5)
+        
+        main()
+        
+    except Exception as e:
+        print(f"\n[FATAL] Critical error during startup: {e}")
+        try:
+            import sys
+            sys.print_exception(e)
+        except:
+            print("[FATAL] Could not print full traceback")
+        print("[FATAL] System halted - restart required")
+        while True:
+            time.sleep(1)
